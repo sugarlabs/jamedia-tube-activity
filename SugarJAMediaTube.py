@@ -3,7 +3,7 @@
 
 #   JAMediaTube.py por:
 #   Flavio Danesse <fdanesse@gmail.com>
-#   CeibalJAM! - Uruguay
+#   Uruguay
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -19,278 +19,343 @@
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
-import gtk
-import time
+import os
 import sys
+import gtk
 import gobject
 import commands
 
+from Widgets import Toolbar
+from Widgets import Toolbar_Busqueda
+from Widgets import Toolbar_Descarga
+from Widgets import Alerta_Busqueda
+from PanelTube import PanelTube
+from Widgets import ToolbarSalir
+from JAMedia.JAMedia import JAMedia
+from JAMedia.JAMedia import check_path
+from JAMediaYoutube import Buscar
+from JAMediaYoutube import FEED
+from Widgets import WidgetVideoItem
+from Globales import get_colors
+
 from sugar.activity import activity
-from gettext import gettext as _
-import JAMediaGlobals as G
-commands.getoutput('PATH=%s:$PATH' % (G.DIRECTORIO_BASE))
-#commands.getoutput('PATH=$PATH:%s & export PATH' % (G.DIRECTORIO_BASE))
 
-from JAMediaWidgets import *
-import JAMediaYoutubeInterfase as YT
-import JAMediaObjects
-from JAMediaObjects.JAMedia import JAMediaPlayer
-from JAMediaObjects.JAMedia import JAMedia
+BASE_PATH = os.path.dirname(__file__)
 
-gobject.threads_init()
-gtk.gdk.threads_init()
+you_lib = os.path.join(BASE_PATH, "youtube_dl")
+you_file = os.path.join(BASE_PATH, "youtube-dl")
+print commands.getoutput('chmod -R 755 %s' % you_lib)
+print commands.getoutput('chmod 755 %s' % you_file)
 
-class JAMediaTube(activity.Activity):
-    
+TipDescargas = "Arrastra Hacia La Izquierda para Quitarlo de Descargas."
+TipEncontrados = "Arrastra Hacia La Derecha para Agregarlo a Descargas"
+
+
+class SugarJAMediaTube(activity.Activity):
+
     def __init__(self, handle):
-        
-        activity.Activity.__init__(self, handle)
-        
+
+        activity.Activity.__init__(self, handle, False)
+
         self.set_title("JAMediaTube")
-        #self.modify_bg(gtk.STATE_NORMAL, G.BLANCO)
-        self.set_icon_from_file(os.path.join(G.ICONOS, "JAMediaTube.png"))
-        self.set_size_request(G.WIDTH,G.HEIGHT)
-        self.set_border_width(5)
-        self.set_position(gtk.WIN_POS_CENTER)
+        self.set_icon_from_file(os.path.join(BASE_PATH,
+            "Iconos", "JAMediaTube.svg"))
+        self.modify_bg(gtk.STATE_NORMAL, get_colors("window"))
         self.set_resizable(True)
+        self.set_border_width(2)
+        self.set_position(gtk.WIN_POS_CENTER)
 
-        self.barradebusquedas = None
-        self.boxinfoprogressdownload = None
-        self.vboxvideos = None
-        self.vboxparadescargar = None
-        self.toolbar0 = None
-        self.toolbar1 = None
-        self.toolbar2 = None
-        self.label_resultados = None # _("Videos Encontrados:")
-        self.label_descargas = None # _("Videos para Descargar:"))
+        self.box_tube = None
+
+        self.toolbar = None
+        self.toolbar_busqueda = None
+        self.toolbar_descarga = None
+        self.toolbar_salir = None
+        self.alerta_busqueda = None
+        self.paneltube = None
+
         self.jamedia = None
-        self.jamediaview = False
-        self.socket = None
-        self.panel_listas = None
-        self.vboxbase = None
-        self.vboxinterno = None
 
-        self.set_layout()
+        self.archivos = []
+        self.buscador = Buscar()
+
+        gobject.idle_add(self.__setup_init)
+        print "JAMediaTube process:", os.getpid()
+
+    def __setup_init(self):
+        """
+        Crea y Empaqueta todo.
+        """
+        boxbase = gtk.VBox()
+
+        self.box_tube = gtk.VBox()
+        self.toolbar = Toolbar()
+        self.toolbar_busqueda = Toolbar_Busqueda()
+        self.toolbar_descarga = Toolbar_Descarga()
+        self.toolbar_salir = ToolbarSalir()
+        self.alerta_busqueda = Alerta_Busqueda()
+        self.paneltube = PanelTube()
+
+        event = gtk.EventBox()
+        event.modify_bg(0, get_colors("drawingplayer"))
+        event.add(self.toolbar)
+        self.box_tube.pack_start(event, False, False, 0)
+
+        event = gtk.EventBox()
+        event.modify_bg(0, get_colors("download"))
+        event.add(self.toolbar_salir)
+        self.box_tube.pack_start(event, False, False, 0)
+
+        self.box_tube.pack_start(self.toolbar_busqueda, False, False, 0)
+
+        event = gtk.EventBox()
+        event.modify_bg(0, get_colors("download"))
+        event.add(self.toolbar_descarga)
+        self.box_tube.pack_start(event, False, False, 0)
+
+        self.box_tube.pack_start(self.alerta_busqueda, False, False, 0)
+        self.box_tube.pack_start(self.paneltube, True, True, 0)
+
+        self.jamedia = JAMedia()
+
+        boxbase.pack_start(self.box_tube, True, True, 0)
+        boxbase.pack_start(self.jamedia, True, True, 0)
+        self.set_canvas(boxbase)
+
         self.show_all()
         self.realize()
 
-        self.connect("delete_event", self.delete_event)
+        self.paneltube.set_vista_inicial()  # oculta las toolbarsaccion
 
-        self.barradebusquedas.connect("comenzarbusqueda", self.comenzarbusqueda)
+        gobject.idle_add(self.__setup_init2)
 
-        self.toolbar0.connect('salir', self.salir)
-        self.toolbar0.connect('jamedia_jamediatube', self.show_player)
-        self.toolbar1.connect("move", self.movervideos)
-        self.toolbar1.connect("clear", self.eliminarvideos)
-        self.toolbar2.connect("clear", self.movervideos)
-        self.toolbar2.connect("download", self.download)
+    def __setup_init2(self):
+        """
+        Inicializa la aplicación a su estado fundamental.
+        """
+        self.__cancel_toolbar()
+        self.paneltube.cancel_toolbars_flotantes()
 
-        gobject.timeout_add(1000, self.handle)
-        gobject.idle_add(self.add_jamedia)
+        map(self.__ocultar, [self.toolbar_descarga, self.alerta_busqueda])
 
-    def add_jamedia(self):
-        
-        self.jamedia = JAMediaPlayer()
-        self.socket.add_id(self.jamedia.get_id())
-        self.jamedia.connect("OK", self.add_jamediatube)
-
-    def add_jamediatube(self, widget = None):
-        
-        self.socket.hide()
-        self.jamediaview = False
-        self.vboxbase.pack_start(self.vboxinterno, True, True, 0)
-        self.vboxinterno.show_all()
-
-    def show_player(self, widget):
-        
-        if self.jamediaview:
-            self.jamediaview = False
-            self.socket.hide()
-            self.vboxinterno.show_all()
+        if self.archivos:
+            self.__switch(None, 'jamedia')
+            self.jamedia.base_panel.set_nueva_lista(self.archivos)
+            self.archivos = []
         else:
-            self.jamediaview = True
-            self.vboxinterno.hide()
-            self.socket.show()
+            self.__switch(None, 'jamediatube')
 
-    def handle(self):
-        
-        busqueda = len(self.vboxvideos.get_children())
-        self.label_resultados.set_text("%s %s" % (_("Videos Encontrados:"), busqueda))
-        descargas = len(self.vboxparadescargar.get_children())
-        self.label_descargas.set_text("%s %s" % (_("Videos para Descargar:"), descargas))
-        return True
+        self.paneltube.encontrados.drag_dest_set(gtk.DEST_DEFAULT_ALL,
+            target, gtk.gdk.ACTION_MOVE)
 
-    def download (self, widget=None):
-        
-        videos = self.vboxparadescargar.get_children()
+        self.paneltube.encontrados.connect("drag-drop", self.__drag_drop)
+        self.paneltube.encontrados.drag_dest_add_uri_targets()
+
+        self.paneltube.descargar.drag_dest_set(gtk.DEST_DEFAULT_ALL,
+            target, gtk.gdk.ACTION_MOVE)
+
+        self.paneltube.descargar.connect("drag-drop", self.__drag_drop)
+        self.paneltube.descargar.drag_dest_add_uri_targets()
+
+        self.connect("delete-event", self.__salir)
+        self.toolbar.connect('salir', self.__confirmar_salir)
+        self.toolbar_salir.connect('salir', self.__salir)
+        self.toolbar.connect('switch', self.__switch, 'jamedia')
+        self.jamedia.connect('salir', self.__switch, 'jamediatube')
+        self.toolbar_busqueda.connect("comenzar_busqueda",
+            self.__comenzar_busqueda)
+        self.paneltube.connect('download', self.__run_download)
+        self.paneltube.connect('open_shelve_list', self.__open_shelve_list)
+        self.toolbar_descarga.connect('end', self.__run_download)
+        self.paneltube.connect("cancel_toolbar", self.__cancel_toolbar)
+        self.buscador.connect("encontrado", self.__add_video_encontrado)
+        self.buscador.connect("end", self.__end_busqueda)
+        self.resize(640, 480)
+
+    def __cancel_toolbar(self, widget=None):
+        self.toolbar_salir.cancelar()
+
+    def __open_shelve_list(self, widget, shelve_list, toolbarwidget):
+        """
+        Carga una lista de videos almacenada en un archivo en el area del
+        panel correspondiente según que toolbarwidget haya lanzado la señal.
+        """
+        self.paneltube.set_sensitive(False)
+        self.toolbar_busqueda.set_sensitive(False)
+        destino = False
+        if toolbarwidget == self.paneltube.toolbar_encontrados:
+            destino = self.paneltube.encontrados
+        elif toolbarwidget == self.paneltube.toolbar_descargar:
+            destino = self.paneltube.descargar
+        objetos = destino.get_children()
+        for objeto in objetos:
+            objeto.get_parent().remove(objeto)
+            objeto.destroy()
+        gobject.idle_add(self.__add_videos, shelve_list, destino)
+
+    def __run_download(self, widget):
+        """
+        Comienza descarga de un video.
+        """
+        if self.toolbar_descarga.estado:
+            return
+        videos = self.paneltube.descargar.get_children()
         if videos:
-            self.toolbar2.disconnectdownload = True
-            videoitem = videos[0]
-            self.vboxparadescargar.remove(videoitem)
-            descarga = WidgetDescarga(videoitem)
-            self.boxinfoprogressdownload.add(descarga)
-            descarga.connect("end", self.next_download)
+            videos[0].get_parent().remove(videos[0])
+            self.toolbar_descarga.download(videos[0])
         else:
-            self.toolbar2.disconnectdownload = False
+            self.toolbar_descarga.hide()
 
-    def next_download(self, widget):
-        
-        widget.destroy()
-        self.download()
+    def __drag_drop(self, destino, drag_context, x, y, n):
+        """
+        Ejecuta drop sobre un destino.
+        """
+        videoitem = gtk.drag_get_source_widget(drag_context)
+        if videoitem.get_parent() == destino:
+            return
+        else:
+            # E try siguiente es para evitar problemas cuando:
+            # El drag termina luego de que el origen se ha
+            # comenzado a descargar y por lo tanto, no tiene padre.
+            try:
+                videoitem.get_parent().remove(videoitem)
+                destino.pack_start(videoitem, False, False, 1)
+            except:
+                return
+            if destino == self.paneltube.descargar:
+                text = TipDescargas
+            elif destino == self.paneltube.encontrados:
+                text = TipEncontrados
+            videoitem.set_tooltip_text(text)
 
-    def eliminarvideos(self, widget):
-        
-        if widget == self.toolbar1:
-            if not self.vboxvideos.get_children(): return
-            dialog = StandarDialog(self, "Mensaje JAMedia",
-                _("¿ Eliminar Toda la Búsqueda ?"))
-            response = dialog.run()
-            dialog.destroy()
-            if response == gtk.RESPONSE_YES:
-                for child in self.vboxvideos.get_children():
-                    self.vboxvideos.remove(child)
-                    child.destroy()
-                    
-    def movervideos(self, widget):
-        
-        if widget == self.toolbar1:
-            for child in self.vboxvideos.get_children():
-                self.vboxvideos.remove(child)
-                self.vboxparadescargar.pack_start(child, False, False, 1)
-                tooltips = gtk.Tooltips()
-                text = "Arrastra Hacia La Izquierda para Quitarlo de las Descargas"
-                tooltips.set_tip(child, _(text), tip_private=None)
-                
-        elif widget == self.toolbar2:
-            for child in self.vboxparadescargar.get_children():
-                self.vboxparadescargar.remove(child)
-                self.vboxvideos.pack_start(child, False, False, 1)
-                tooltips = gtk.Tooltips()
-                text = "Arrastra Hacia La Derecha para Agregarlo a Descargas"
-                tooltips.set_tip(child, _(text), tip_private=None)
-        
-    def comenzarbusqueda(self, widget, palabras):
-        
-        alert = AlertBusqueda(self)
-        alert.connect("lanzarbusqueda", self.lanzarbusqueda, palabras)
-        
-    def lanzarbusqueda(self, widget, palabras):
-        
-        for child in self.vboxvideos.get_children():
-            self.vboxvideos.remove(child)
-            child.destroy()
-            
-        for video in YT.Buscar(palabras):
-            videowidget = WidgetVideoItem(video)
-            tooltips = gtk.Tooltips()
-            text = "Arrastra Hacia La Derecha para Agregarlo a Descargas"
-            tooltips.set_tip(videowidget, _(text), tip_private=None)
-            self.vboxvideos.pack_start(videowidget, False, False, 1)
-            videowidget.drag_source_set(gtk.gdk.BUTTON1_MASK, targets, gtk.gdk.ACTION_MOVE)
-            #videowidget.drag_source_set_icon_pixbuf(child.imagen.pixbuf)
-        widget.destroy()
+    def __add_video_encontrado(self, buscador, _id, url):
+        """
+        Cuando el buscador encuentra un video, se agrega al panel.
+        """
+        video = dict(FEED)
+        video["id"] = _id
+        video["titulo"] = ""
+        video["descripcion"] = ""
+        video["categoria"] = ""
+        video["url"] = url
+        video["duracion"] = 0
+        video["previews"] = ""
+        self.__add_videos([video], self.paneltube.encontrados, sensitive=False)
+        while gtk.events_pending():
+            gtk.main_iteration()
+        # Para evitar mover videos antes de lanzar actualización de metadatos
 
-    def set_layout(self):
-        
-        self.vboxbase = gtk.VBox()
-        self.toolbar0 = Toolbar0()
-        self.vboxbase.pack_start(self.toolbar0, False, False, 5)
+    def __end_busqueda(self, buscador):
+        """
+        Cuando Termina la Búsqueda, se actualizan los widgets de videos.
+        """
+        self.paneltube.update_widgets_videos_encontrados()
+        self.paneltube.set_sensitive(True)
 
-        self.vboxinterno = gtk.VBox()
-        #self.vboxbase.pack_start(self.vboxinterno, True, True, 0)
+    def __comenzar_busqueda(self, widget, palabras, cantidad):
+        """
+        Muestra alerta de busqueda y lanza secuencia de busqueda y
+        agregado de videos al panel.
+        """
+        self.paneltube.set_sensitive(False)
+        self.toolbar_busqueda.set_sensitive(False)
+        self.__cancel_toolbar()
+        self.paneltube.cancel_toolbars_flotantes()
+        map(self.__mostrar, [self.alerta_busqueda])
+        self.alerta_busqueda.label.set_text("Buscando: %s" % (palabras))
+        objetos = self.paneltube.encontrados.get_children()
+        for objeto in objetos:
+            objeto.get_parent().remove(objeto)
+            objeto.destroy()
+        gobject.timeout_add(300, self.__lanzar_busqueda, palabras, cantidad)
 
-        self.barradebusquedas = Barra_de_Busquedas()
-        self.boxinfoprogressdownload = gtk.EventBox()
-        self.boxinfoprogressdownload.set_visible_window(False)
-        self.panel_listas = gtk.HPaned()
-        self.vboxinterno.pack_start(self.barradebusquedas, False, False, 0)
-        self.vboxinterno.pack_start(self.boxinfoprogressdownload, False, False, 0)
-        self.vboxinterno.pack_start(self.panel_listas, True, True, 0)
-
-        vbox = gtk.VBox() # videos encontrados
-        self.vboxvideos = gtk.VBox()
-        sw = gtk.ScrolledWindow()
-        sw.set_policy(gtk.POLICY_AUTOMATIC, gtk.POLICY_AUTOMATIC)
-        sw.add_with_viewport(self.vboxvideos)
-        self.toolbar1 = Toolbar1()
-        toolbar = gtk.Toolbar()
-        #toolbar.modify_bg(gtk.STATE_NORMAL, G.NEGRO)
-        separator = gtk.SeparatorToolItem()
-        separator.props.draw = False
-        separator.set_size_request(5, -1)
-        separator.set_expand(False)
-        toolbar.insert(separator, -1)
-        self.label_resultados = gtk.Label(_("Videos Encontrados:"))
-        #self.label_resultados.modify_fg(gtk.STATE_NORMAL, G.AMARILLO)
-        item = gtk.ToolItem()
-        item.add(self.label_resultados)
-        self.label_resultados.show()
-        toolbar.insert(item, -1)
-        vbox.pack_start(toolbar, False, False, 0)
-        vbox.pack_start(sw, True, True, 0)
-        vbox.pack_start(self.toolbar1, False, False, 0)
-        self.panel_listas.pack1(vbox, resize=True, shrink=True)
-
-        vbox = gtk.VBox() # videos en descarga
-        self.vboxparadescargar = gtk.VBox()
-        sw = gtk.ScrolledWindow()
-        sw.set_policy(gtk.POLICY_AUTOMATIC, gtk.POLICY_AUTOMATIC)
-        sw.add_with_viewport(self.vboxparadescargar)
-        self.toolbar2 = Toolbar2()
-        toolbar = gtk.Toolbar()
-        #toolbar.modify_bg(gtk.STATE_NORMAL, G.NEGRO)
-        separator = gtk.SeparatorToolItem()
-        separator.props.draw = False
-        separator.set_size_request(5, -1)
-        separator.set_expand(False)
-        toolbar.insert(separator, -1)
-        self.label_descargas = gtk.Label(_("Videos para Descargar:"))
-        #self.label_descargas.modify_fg(gtk.STATE_NORMAL, G.AMARILLO)
-        item = gtk.ToolItem()
-        item.add(self.label_descargas)
-        self.label_descargas.show()
-        toolbar.insert(item, -1)
-        vbox.pack_start(toolbar, False, False, 0)
-        vbox.pack_start(sw, True, True, 0)
-        vbox.pack_start(self.toolbar2, False, False, 0)
-        self.panel_listas.pack2(vbox, resize=True, shrink=True)
-
-        self.socket = gtk.Socket() # para embeber jamedia
-        # self.vboxbase.pack_start(self.vboxinterno, True, True, 0)
-        self.vboxbase.pack_start(self.socket, True, True, 0)
-        #self.add(self.vboxbase)
-        self.set_canvas(self.vboxbase)
-
-        self.vboxparadescargar.drag_dest_set(gtk.DEST_DEFAULT_ALL,
-            targets, gtk.gdk.ACTION_MOVE)
-        self.vboxparadescargar.connect("drag-drop", self.drag_drop)
-        self.vboxvideos.drag_dest_set(gtk.DEST_DEFAULT_ALL,
-            targets, gtk.gdk.ACTION_MOVE)
-        self.vboxvideos.connect("drag-drop", self.drag_drop)
-
-    def drag_drop(self, destino, drag_context, x, y, cosas):
-        
-        objeto = drag_context.get_source_widget()
-        if objeto.get_parent() == destino: return
-
-        objeto.get_parent().remove(objeto)
-        destino.pack_start(objeto, False, False, 1)
-
-        if destino == self.vboxparadescargar:
-            tooltips = gtk.Tooltips()
-            text = "Arrastra Hacia La Izquierda para Quitarlo de las Descargas"
-            tooltips.set_tip(objeto, text, tip_private=None)
-        elif destino == self.vboxvideos:
-            tooltips = gtk.Tooltips()
-            text = "Arrastra Hacia La Derecha para Agregarlo a Descargas"
-            tooltips.set_tip(objeto, text, tip_private=None)
-
-    def delete_event(self, widget, event, data=None):
-        self.salir()
+    def __lanzar_busqueda(self, palabras, cantidad):
+        """
+        Lanza la Búsqueda y comienza secuencia que agrega los videos al panel.
+        """
+        # FIXME: Reparar (Si no hay conexión)
+        self.buscador.buscar(palabras, cantidad)
         return False
 
-    def salir(self, widget= None, event= None):
-        G.close()
+    def __add_videos(self, videos, destino, sensitive=True):
+        """
+        Se crean los video_widgets y se agregan al panel, segun destino.
+        """
+        if not videos:
+            map(self.__ocultar, [self.alerta_busqueda])
+            if sensitive:
+                self.paneltube.set_sensitive(True)
+            self.toolbar_busqueda.set_sensitive(True)
+            return False
+
+        video = videos[0]
+        videowidget = WidgetVideoItem(video)
+        text = TipEncontrados
+
+        if destino == self.paneltube.encontrados:
+            text = TipEncontrados
+        elif destino == self.paneltube.descargar:
+            text = TipDescargas
+
+        videowidget.set_tooltip_text(text)
+        videowidget.show_all()
+        videowidget.drag_source_set(gtk.gdk.BUTTON1_MASK, target,
+            gtk.gdk.ACTION_MOVE)
+        videos.remove(video)
+        destino.pack_start(videowidget, False, False, 1)
+
+        texto = "Encontrado: %s" % (video["titulo"])
+        if len(texto) > 50:
+            texto = str(texto[0:50]) + " . . . "
+
+        self.alerta_busqueda.label.set_text(texto)
+        gobject.idle_add(self.__add_videos, videos, destino, sensitive)
+        return False
+
+    def __switch(self, widget, valor):
+        """
+        Cambia entre la vista de descargas y la de reproduccion.
+        """
+        if valor == 'jamediatube':
+            map(self.__ocultar, [self.jamedia])
+            map(self.__mostrar, [self.box_tube])
+        elif valor == 'jamedia':
+            map(self.__ocultar, [self.box_tube])
+            map(self.__mostrar, [self.jamedia])
+
+    def __ocultar(self, objeto):
+        if objeto.get_visible():
+            objeto.hide()
+
+    def __mostrar(self, objeto):
+        if not objeto.get_visible():
+            objeto.show()
+
+    def __confirmar_salir(self, widget=None, senial=None):
+        self.paneltube.cancel_toolbars_flotantes()
+        self.toolbar_salir.run("JAMediaTube")
+
+    def __salir(self, widget=None, senial=None):
+        gtk.main_quit()
         sys.exit(0)
 
-targets = [("Moviendo", gtk.TARGET_SAME_APP, 1)]
+    def set_archivos(self, pistas):
+        """
+        Cuando se ejecuta pasandole un archivo.
+        """
+        self.archivos = pistas
+
+    def read_file(self, file_path):
+        items = []
+        path = os.path.realpath(file_path)
+        if os.path.isfile(path):
+            item = check_path(path)
+            if item:
+                items.append(item)
+        self.set_archivos(items)
+
+    def write_file(self, file_path):
+        pass
+
+
+target = [('Mover', gtk.TARGET_SAME_APP, 1)]
