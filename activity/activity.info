@@ -1,0 +1,7 @@
+[Activity]
+name = JAMediaTube
+activity_version = 4
+bundle_id = org.laptop.JAMediaTube
+exec = sugar-activity SugarJAMediaTube.JAMediaTube
+icon = JAMediaTube
+show_launcher = yes
