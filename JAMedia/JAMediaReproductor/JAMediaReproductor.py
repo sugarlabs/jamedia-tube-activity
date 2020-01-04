@@ -83,7 +83,7 @@ class JAMediaReproductor(gobject.GObject):
 
     def __sync_message(self, bus, message):
         if message.type == gst.MESSAGE_ELEMENT:
-            if message.structure.get_name() == 'prepare-xwindow-id':
+            if message.get_structure.get_name() == 'prepare-xwindow-id':
                 #gtk.gdk.threads_enter()
                 #gtk.gdk.display_get_default().sync()
                 message.src.set_xwindow_id(self.ventana_id)
@@ -139,7 +139,7 @@ class JAMediaReproductor(gobject.GObject):
             self.__new_handle(False)
 
         elif message.type == gst.MESSAGE_BUFFERING:
-            buf = int(message.structure["buffer-percent"])
+            buf = int(message.get_structure["buffer-percent"])
             if buf < 100 and self.estado == gst.STATE_PLAYING:
                 self.emit("loading-buffer", buf)
                 self.__pause()

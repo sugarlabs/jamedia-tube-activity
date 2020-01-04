@@ -70,14 +70,14 @@ class JAMediaReproductor(gtk.Object):
         
     def on_sync_message(self, bus, message):
         
-        if "prepare-xwindow-id" in message.structure.get_name():
+        if "prepare-xwindow-id" in message.get_structure.get_name():
             imagesink = message.src
             #imagesink.set_property("force-aspect-ratio", False)
             imagesink.set_property("force-aspect-ratio", True)
             gtk.gdk.threads_enter()
             imagesink.set_xwindow_id(self.ventana_id)
             gtk.gdk.threads_leave()
-        elif "playbin2-stream-changed" in message.structure.get_name():
+        elif "playbin2-stream-changed" in message.get_structure.get_name():
             pass
         
     def on_message(self, bus, message):
@@ -92,34 +92,34 @@ class JAMediaReproductor(gtk.Object):
             self.emit("endfile", True) # También se puede: self.bus.connect("message::eos", self.on_finish)
             
         elif message.type == gst.MESSAGE_STATE_CHANGED:
-            if message.structure["old-state"] == gst.STATE_PAUSED and \
-                message.structure["new-state"] == gst.STATE_PLAYING:
+            if message.get_structure["old-state"] == gst.STATE_PAUSED and \
+                message.get_structure["new-state"] == gst.STATE_PLAYING:
                     
-                if self.estado != message.structure["new-state"]:
-                    self.estado = message.structure["new-state"]
+                if self.estado != message.get_structure["new-state"]:
+                    self.estado = message.get_structure["new-state"]
                     self.emit("estado", "playing")
                     
-            elif message.structure["old-state"] == gst.STATE_READY and \
-                message.structure["new-state"] == gst.STATE_PAUSED:
+            elif message.get_structure["old-state"] == gst.STATE_READY and \
+                message.get_structure["new-state"] == gst.STATE_PAUSED:
                     
-                if self.estado != message.structure["new-state"]:
-                    self.estado = message.structure["new-state"]
+                if self.estado != message.get_structure["new-state"]:
+                    self.estado = message.get_structure["new-state"]
                     self.emit("estado", "paused")
             else:
                 pass
         '''
         elif message.type == gst.MESSAGE_TAG:
-            if message.structure.has_field("video-codec"):
+            if message.get_structure.has_field("video-codec"):
                 #print "Codec de Video en la Fuente"
         elif message.type == gst.MESSAGE_BUFFERING:
             pass
-            # print message.structure["buffer-percent"]
+            # print message.get_structure["buffer-percent"]
         elif message.type == gst.MESSAGE_DURATION:
-            # self.duracion= message.structure["duration"]
+            # self.duracion= message.get_structure["duration"]
             # En la práctica, es recomendable y mas seguro obtener este dato en el handle.
             pass
         elif message.type == gst.MESSAGE_STREAM_STATUS:
-            mensaje= message.structure.to_string().split(",")
+            mensaje= message.get_structure.to_string().split(",")
             for m in mensaje:
                 print "\t", m
         elif message.type == gst.MESSAGE_ELEMENT:
@@ -127,7 +127,7 @@ class JAMediaReproductor(gtk.Object):
         elif message.type == gst.MESSAGE_QOS or message.type == gst.MESSAGE_ASYNC_DONE:
         else:
             try:
-                print message.type, message.structure.get_name(), message.structure.to_string()
+                print message.type, message.get_structure.get_name(), message.get_structure.to_string()
             except:
                 print message'''
 
