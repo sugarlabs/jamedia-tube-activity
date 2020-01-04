@@ -131,7 +131,7 @@ class JAMediaGrabador(gobject.GObject):
             self.__new_handle(False)
             self.emit("endfile")
         elif message.type == gst.MESSAGE_BUFFERING:
-            buf = int(message.structure["buffer-percent"])
+            buf = int(message.get_structure["buffer-percent"])
             if buf < 100 and self.estado == gst.STATE_PLAYING:
                 #self.emit("loading-buffer", buf)
                 self.__pause()
